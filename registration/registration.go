@@ -1,4 +1,4 @@
-package main
+package registration
 
 import (
 	"fmt"
@@ -41,17 +41,26 @@ func registerHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func setTokenCookie(w http.ResponseWriter, r *http.Request) {
-	username := r.URL.Query().Get("username")
-	password := r.URL.Query().Get("password")
+	http.Redirect(w, r, "/checkcookie", http.StatusSeeOther)
+	//тут сделать редирект на калькулятор
 
-	jwtToken, _ := generateJWTToken(username, password)
+}
+func jwtMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		username := r.URL.Query().Get("username")
+		password := r.URL.Query().Get("password")
+		_, _ = generateJWTToken(username, password)
+		//jwtToken, _ := generateJWTToken(username, password)
 
-	cookie := &http.Cookie{
-		Name:  "jwt_token",
-		Value: jwtToken,
-	}
-	http.SetCookie(w, cookie)
+		cookie := &http.Cookie{
+			Name: "jwt_token",
+			//Value: jwtToken,
+			Value: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3MTM2OTAxNzIsInBhc3N3b3JkIjoiIiwidXNlcm5hbWUiOiIifQ.yl2q1sjI_-V6tXURGbJgrDx4TvjaA9hWBXKjvXtTkpU",
+		}
+		http.SetCookie(w, cookie)
 
+		next.ServeHTTP(w, r)
+	})
 }
 
 func CheckCookie(w http.ResponseWriter, r *http.Request) {
@@ -60,8 +69,10 @@ func CheckCookie(w http.ResponseWriter, r *http.Request) {
 	tmpl.Execute(w, map[string]interface{}{"Tokens": Tokens})
 }
 
+//это переделать в мидлварь и накрутить на страницы калькулятора
+
 func main() {
-	http.HandleFunc("/setcookie", setTokenCookie)
+	http.Handle("/setcookie", jwtMiddleware(http.HandlerFunc(setTokenCookie)))
 	http.HandleFunc("/login", loginHandler)
 	http.HandleFunc("/registration", registerHandler)
 	http.HandleFunc("/checkcookie", CheckCookie)

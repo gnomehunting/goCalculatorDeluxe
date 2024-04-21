@@ -1,4 +1,4 @@
-package main
+package orchestra
 
 import (
 	"fmt"
@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/golang-jwt/jwt"
+	"github.com/dgrijalva/jwt-go"
 )
 
 type User struct {
@@ -90,7 +90,7 @@ func extractUsernameFromCookie(jwtCookie string) (string, error) {
 }
 
 // ПЕРЕДЕЛАТЬ, ВМЕСТО МАПЫ БАЗУ ДАННЫХ
-func ReceiveResult(w http.ResponseWriter, r *http.Request) { // /receiveresult/ агент отправляет выражение на эндпоинт /receiveresult/ и оно изменяется в мапе MapOfEspressions, Агенту, решившему и отправившему результат присваивается статус online
+func ReceiveResult(w http.ResponseWriter, r *http.Request) { // агент отправляет выражение на эндпоинт /receiveresult/ и оно изменяется в мапе MapOfEspressions, Агенту, решившему и отправившему результат присваивается статус online
 	result := r.URL.Query().Get("Result")
 	id := r.URL.Query().Get("Id")
 	port := r.URL.Query().Get("AgentPort")
