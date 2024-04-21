@@ -49,13 +49,11 @@ func jwtMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		username := r.URL.Query().Get("username")
 		password := r.URL.Query().Get("password")
-		_, _ = generateJWTToken(username, password)
-		//jwtToken, _ := generateJWTToken(username, password)
+		jwtToken, _ := generateJWTToken(username, password)
 
 		cookie := &http.Cookie{
-			Name: "jwt_token",
-			//Value: jwtToken,
-			Value: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3MTM2OTAxNzIsInBhc3N3b3JkIjoiIiwidXNlcm5hbWUiOiIifQ.yl2q1sjI_-V6tXURGbJgrDx4TvjaA9hWBXKjvXtTkpU",
+			Name:  "jwt_token",
+			Value: jwtToken,
 		}
 		http.SetCookie(w, cookie)
 

@@ -11,7 +11,7 @@ import (
 type User struct {
 	ID             int    `db:"ID"`
 	JWT            string `db:"JWT"`
-	Login          string `db:"LOGIN"`
+	Username       string `db:"USERNAME"`
 	Password       string `db:"PASSWORD"`
 	PlusTiming     int    `db:"PLUS_TIMING"`
 	MinusTiming    int    `db:"MINUS_TIMING"`
@@ -48,7 +48,7 @@ func initDB(db *sql.DB) {
 	CREATE TABLE IF NOT EXISTS USERS (
 	ID INTEGER PRIMARY KEY AUTOINCREMENT,
 	JWT TEXT,
-	LOGIN TEXT UNIQUE,
+	USERNAME TEXT UNIQUE,
 	PASSWORD TEXT,
 	PLUS_TIMING INTEGER,
 	MINUS_TIMING INTEGER,
@@ -81,9 +81,9 @@ func initDB(db *sql.DB) {
 // USERS Table Functions
 // ---------------------
 
-func addUser(db *sql.DB, jwt, login, password string, plusTiming, minusTiming, multiplyTiming, divideTiming, toShowTiming int) {
-	_, err := db.Exec("INSERT INTO USERS (JWT, LOGIN, PASSWORD, PLUS_TIMING, MINUS_TIMING, MULTIPLY_TIMING, DIVIDE_TIMING, TOSHOW_TIMING) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-		jwt, login, password, plusTiming, minusTiming, multiplyTiming, divideTiming, toShowTiming)
+func addUser(db *sql.DB, jwt, username, password string, plusTiming, minusTiming, multiplyTiming, divideTiming, toShowTiming int) {
+	_, err := db.Exec("INSERT INTO USERS (JWT, USERNAME, PASSWORD, PLUS_TIMING, MINUS_TIMING, MULTIPLY_TIMING, DIVIDE_TIMING, TOSHOW_TIMING) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+		jwt, username, password, plusTiming, minusTiming, multiplyTiming, divideTiming, toShowTiming)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -115,16 +115,16 @@ func updateUserTimings(db *sql.DB, id int, plusTiming, minusTiming, multiplyTimi
 func getUserByID(db *sql.DB, id int) (User, error) {
 	var user User
 	row := db.QueryRow("SELECT * FROM USERS WHERE ID = ?", id)
-	err := row.Scan(&user.ID, &user.JWT, &user.Login, &user.Password,
+	err := row.Scan(&user.ID, &user.JWT, &user.Username, &user.Password,
 		&user.PlusTiming, &user.MinusTiming, &user.MultiplyTiming, &user.DivideTiming, &user.ToShowTiming)
 	if err != nil {
 		return User{}, err // Return empty User and error
 	}
 	return user, nil
 }
-func getUserIDByLogin(db *sql.DB, loginParam string) (int, error) {
+func getUserIDByUsername(db *sql.DB, username string) (int, error) {
 	var userID int
-	err := db.QueryRow("SELECT ID FROM USERS WHERE LOGIN = ?", loginParam).Scan(&userID)
+	err := db.QueryRow("SELECT ID FROM USERS WHERE USERNAME = ?", username).Scan(&userID)
 	if err != nil {
 		return 0, err
 	}
@@ -240,7 +240,7 @@ func FetchUsers(db *sql.DB) ([]User, error) {
 	var users []User
 	for rows.Next() {
 		var user User
-		err := rows.Scan(&user.ID, &user.JWT, &user.Login, &user.Password, &user.PlusTiming, &user.MinusTiming,
+		err := rows.Scan(&user.ID, &user.JWT, &user.Username, &user.Password, &user.PlusTiming, &user.MinusTiming,
 			&user.MultiplyTiming, &user.DivideTiming, &user.ToShowTiming)
 		if err != nil {
 			return nil, err
