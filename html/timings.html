@@ -5,16 +5,22 @@
     <title>Timings</title>
 </head>
 <body>
+    {{$fromcontextUsername := .Username}}
     <h1><a href="/calculator/" >Calculator</a> &nbsp
         <a href="/timings/" >Timings</a> &nbsp
         <a href="/agents/" >Agent Monitoring </a>
     <h1>
         <br>
         <h2>TIMINGS</h2>
+        <h2>Logged in as: {{$fromcontextUsername}}</h2>
         <br>
     <h3>
         <div id="display">
-            Time to add: {{.Plus}} second <br> Time to subtract: {{.Minus}} second <br> Time to multiply: {{.Multiply}} second <br> Time to divide: {{.Divide}} second<br> Display time of inactive server: {{.DisplayTime}} second <br>
+            {{range .List}}
+                {{if eq $fromcontextUsername .UserName}}
+                Time to add: {{.PlusTiming}} second <br> Time to subtract: {{.MinusTiming}} second <br> Time to multiply: {{.MultiplyTiming}} second <br> Time to divide: {{.DivideTiming}} second<br> Display time of inactive server: {{.ToShowTiming}} second <br>
+                {{end}}
+            {{end}}
         </div> 
         <form hx-post="/changetimings/"  hx-target="#display" hx-select="#display" hx-swap="outerHTML">
           

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"regexp"
+	"slices"
 	"strings"
 	"text/template"
 	"time"
@@ -15,7 +16,7 @@ import (
 type User struct {
 	ID             int    `db:"ID"`
 	JWT            string `db:"JWT"`
-	Username       string `db:"USERNAME"`
+	UserName       string `db:"USERNAME"`
 	Password       string `db:"PASSWORD"`
 	PlusTiming     int    `db:"PLUS_TIMING"`
 	MinusTiming    int    `db:"MINUS_TIMING"`
@@ -25,10 +26,11 @@ type User struct {
 }
 
 type Expression struct {
-	ExpressionID   int    `db:"EXPRESSION_ID"`
-	ExpressionText string `db:"EXPRESSION_TEXT"`
-	Status         string `db:"STATUS"`
-	UserId         int    `db:"USER_ID"`
+	ExpressionID     int    `db:"EXPRESSION_ID"`
+	ExpressionText   string `db:"EXPRESSION_TEXT"`
+	Status           string `db:"STATUS"`
+	UserName         string `db:"USER_NAME"`
+	ExpressionResult int    `db:EXPRESSION_RESULT`
 }
 
 type Agent struct {
@@ -37,9 +39,27 @@ type Agent struct {
 	Port            string `db:"PORT"`
 	NotRespondedFor int    `db:"NOT_RESPONDED_FOR"`
 }
+type TemplateAgentData struct {
+	List     []Agent
+	Username string
+}
+
+type TemplateExpressionsData struct {
+	List     []Expression
+	Username string
+}
+
+type TemplateUserData struct {
+	List     []User
+	Username string
+}
 
 var (
-	secretkey = "supersecretkey"
+	secretkey             = []byte("supersecretkey")
+	validCookies          = []string{}
+	EXAMPLEagentList      = []Agent{{1, "online", "8085", 0}, {2, "online", "8085", 0}, {3, "online", "8085", 0}}
+	EXAMPLEexpressionList = []Expression{{1, "2+2", "notsolved", "lilbobby", 0}, {2, "2+3", "notsolved", "freakyBob", 0}, {3, "2+4", "notsolved", "freakyBob", 0}}
+	EXAMPLEuserList       = []User{{1, "jwt", "FreakyBob", "password", 10, 10, 10, 10, 10}, {1, "jwt", "BillyBalls", "password", 20, 20, 20, 20, 20}}
 )
 
 ///////////////////////////////////////////
@@ -118,55 +138,70 @@ func LoginHandler(w http.ResponseWriter, r *http.Request) {
 
 }
 
-func RegistrationHandler(w http.ResponseWriter, r *http.Request) {
-	tmpl := template.Must(template.ParseFiles("html/registration.html"))
-	tmpl.Execute(w, nil)
-}
+//func RegistrationHandler(w http.ResponseWriter, r *http.Request) {
+//	tmpl := template.Must(template.ParseFiles("html/registration.html"))
+//	tmpl.Execute(w, nil)
+//}
 
-func SetJwtCookieMiddleware(next http.Handler) http.Handler { //заставить эту хуету получать данные из формы
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		r.ParseForm()
+func SetCookieAndRedirect(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodPost {
 		username := r.FormValue("username")
 		password := r.FormValue("password")
-		jwtToken, _ := generateJWTToken(username, password)
 
-		cookie := &http.Cookie{
-			Name:  "jwt_token",
-			Value: jwtToken,
-		}
-		http.SetCookie(w, cookie)
-
-		next.ServeHTTP(w, r)
-	})
+		SetCookieMiddleware(w, username, password)
+		http.Redirect(w, r, "/calculator/", http.StatusSeeOther)
+	}
 }
 
-func CheckAuthMiddleware(next http.Handler) http.Handler { // надо запихнуть перед всеми страницами за исключением регистрации и логина
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+func SetCookieMiddleware(w http.ResponseWriter, username, password string) {
+	jwtToken, _ := generateJWTToken(username, password)
+	validCookies = append(validCookies, jwtToken) //!!!!!!!!!!!!!!!! ПЕРЕДЕЛАТЬ ДОБАВЛЕНИЕ В ДБ, ВОЗМОЖНО ПОНАДРОБИТСЯ ФУНКЦИЯ
+
+	// Создаем cookie для jwt_token
+	jwtCookie := &http.Cookie{
+		Name:   "jwt_token",
+		Value:  jwtToken,
+		Path:   "/",
+		Domain: "localhost",
+	}
+	http.SetCookie(w, jwtCookie)
+
+	// Создаем cookie для username
+	usernameCookie := &http.Cookie{
+		Name:   "username",
+		Value:  username,
+		Path:   "/",
+		Domain: "localhost",
+	}
+	http.SetCookie(w, usernameCookie)
+}
+
+// http.HandleFunc("/<youraddr>", CheckCookieMiddleware(<yourfunc>, validCookies))
+func CheckCookieMiddleware(next http.HandlerFunc, validCookies *[]string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
 		cookie, err := r.Cookie("jwt_token")
-		if err != nil {
-			http.Redirect(w, r, "/login", http.StatusSeeOther)
+		if err != nil || !slices.Contains(*validCookies, cookie.Value) {
+			http.Redirect(w, r, "/login/", http.StatusSeeOther)
 			return
 		}
-		username, err := extractUsernameFromCookie(cookie.Value)
-		if err != nil {
-			http.Redirect(w, r, "/login", http.StatusSeeOther)
+		username, err := r.Cookie("username")
+		if err != nil || !slices.Contains(*validCookies, cookie.Value) {
+			http.Redirect(w, r, "/login/", http.StatusSeeOther)
 			return
 		}
-		ctx := context.WithValue(r.Context(), "username", username)
-		next.ServeHTTP(w, r.WithContext(ctx))
-	})
+		ctx := context.WithValue(r.Context(), "username", username.Value)
+		next(w, r.WithContext(ctx))
+	}
 }
 
 func main() {
-	http.HandleFunc("/registration", RegistrationHandler)
-	http.HandleFunc("/login", LoginHandler)
+	//http.HandleFunc("/registration", RegistrationHandler)
+	http.HandleFunc("/login/", LoginHandler)
 
-	http.Handle("/submitregistration", SetJwtCookieMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		http.Redirect(w, r, "/calculator", http.StatusSeeOther)
-	})))
-	http.Handle("/calculator", CheckAuthMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte("Welcome to the calculator page!"))
-	})))
+	http.HandleFunc("/submit/", SetCookieAndRedirect)
+	http.HandleFunc("/agents/", CheckCookieMiddleware(AgentsPage, &validCookies))
+	http.HandleFunc("/calculator/", CheckCookieMiddleware(CalculatorPage, &validCookies))
+	http.HandleFunc("/timings/", CheckCookieMiddleware(TimingsPage, &validCookies))
 	http.ListenAndServe(":8080", nil)
 }
 
@@ -183,7 +218,14 @@ func AddExpression(w http.ResponseWriter, r *http.Request) {
 }
 
 func CalculatorPage(w http.ResponseWriter, r *http.Request) { // /calculator/ отрисовка страницы калькулятор, в темплейт передаётся мапа выражений
-	//отрисовка
+	tmpl := template.Must(template.ParseFiles("html/calculator.html"))
+	username := r.Context().Value("username").(string)
+	data := TemplateExpressionsData{
+		List:     EXAMPLEexpressionList,
+		Username: username,
+	}
+	tmpl.Execute(w, data)
+	//делается запрос в дб, он требует выражения, у которых username == cookie.username, и список с ними отправляется в темплейт
 }
 
 func ChangeTimings(w http.ResponseWriter, r *http.Request) {
@@ -191,7 +233,15 @@ func ChangeTimings(w http.ResponseWriter, r *http.Request) {
 }
 
 func TimingsPage(w http.ResponseWriter, r *http.Request) { // /timings/ отрисовка страницы с таймингами, в темплейт передаются тайминги
-	//отрисовка
+	tmpl := template.Must(template.ParseFiles("html/timings.html"))
+	tmpl.Execute(w, EXAMPLEuserList)
+	username := r.Context().Value("username").(string)
+	data := TemplateUserData{
+		List:     EXAMPLEuserList,
+		Username: username,
+	}
+	tmpl.Execute(w, data)
+	//делается запрос в дб, он требует пользователей, у которых username == cookie.username, его тайминги
 }
 
 func AddAgent(w http.ResponseWriter, r *http.Request) {
@@ -199,7 +249,14 @@ func AddAgent(w http.ResponseWriter, r *http.Request) {
 }
 
 func AgentsPage(w http.ResponseWriter, r *http.Request) { // /agents/ отрисовка страницы с агентами, в темплейт передаётся список агентов
-	//отрисовка
+	tmpl := template.Must(template.ParseFiles("html/agents.html"))
+	tmpl.Execute(w, EXAMPLEagentList)
+	username := r.Context().Value("username").(string)
+	data := TemplateAgentData{
+		List:     EXAMPLEagentList,
+		Username: username,
+	}
+	tmpl.Execute(w, data)
 }
 
 func heartbeat() {
@@ -209,7 +266,10 @@ func heartbeat() {
 func ResetAgent() {
 	//обнуляем агента
 }
-func dbPuller() {} //берём всё из дб, раскидываем по спискам, всем агентам присылаем приказ обнулиться
+func dbPuller() {
+
+} //берём всё из дб, раскидываем по спискам, всем агентам присылаем приказ обнулиться
+
 func solver() {
 	//пробегаемся по выражениям и раскидываем их по свободным агентам
 }

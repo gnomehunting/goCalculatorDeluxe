@@ -10,40 +10,32 @@ import (
 	"strconv"
 	"strings"
 	"time"
-
-	"github.com/dgrijalva/jwt-go"
 )
 
-type User struct {
-	ID             int    `db:"ID"`
-	JWT            string `db:"JWT"`
-	Login          string `db:"LOGIN"`
-	Password       string `db:"PASSWORD"`
-	PlusTiming     int    `db:"PLUS_TIMING"`
-	MinusTiming    int    `db:"MINUS_TIMING"`
-	MultiplyTiming int    `db:"MULTIPLY_TIMING"`
-	DivideTiming   int    `db:"DIVIDE_TIMING"`
-	ToShowTiming   int    `db:"TOSHOW_TIMING"`
+type Agent struct { // структура, которая отражает агента: поле статус(notresponding/busy/dead/online), порт, поле отражающее кол во пропущенных хартбитов, поле, которое говорит - показывать агента на вебстранице, или нет
+	Status       string
+	Port         string
+	NotResponded int
+	Display      bool
 }
-
-type Expression struct {
-	ExpressionID   int    `db:"EXPRESSION_ID"`
-	ExpressionText string `db:"EXPRESSION_TEXT"`
-	Status         string `db:"STATUS"`
-	UserId         int    `db:"USER_ID"`
+type Expression struct { // структура, которая отражает выражение: поле текст(выражение записанное в строку, подлежит eval'у агентом), id, результат, и статус(notsolved/solving/solved/invalid)
+	Text   string
+	Id     string
+	Result string
+	Status string
 }
-
-type Agent struct {
-	AgentID         int    `db:"AGENT_ID"`
-	Status          string `db:"STATUS"`
-	Port            string `db:"PORT"`
-	NotRespondedFor int    `db:"NOT_RESPONDED_FOR"`
+type Timings struct { // время в секундах, требуемое для операции и время показа сервера, не принимающего хартибиты(задаётся на 2 веб странице сервера)
+	Plus        string
+	Minus       string
+	Multiply    string
+	Divide      string
+	DisplayTime string
 }
 
 var OrchestraPort string                //порт оркестратора
-var MapOfExpressions map[int]Expression // мапа со структурами key = User.ID; val = Expression
+var MapOfExpressions map[int]Expression // мапа со структурами Expression key == Expression.id
 var ListOfAgents []Agent                // список агентов
-var ListOfUsers []User                  // users
+var newTimings Timings                  // тайминги
 
 func isValidExpression(expression string) bool { // функция, которая проверяет выражение на правильность (скобки/знаки/цифры)
 	re := regexp.MustCompile(`^\d+([\+\-\*\/]\d+)+$`)
@@ -69,32 +61,11 @@ func isValidExpression(expression string) bool { // функция, котора
 	return len(stack) == 0 && ismatching
 }
 
-func extractUsernameFromCookie(jwtCookie string) (string, error) {
-	var login string
-	secretKey := "my_secret_key"
-	token, err := jwt.Parse(jwtCookie, func(token *jwt.Token) (interface{}, error) {
-		return []byte(secretKey), nil
-	})
-
-	if err != nil {
-		return "", err
-	}
-
-	if claims, ok := token.Claims.(jwt.MapClaims); ok && token.Valid {
-		login = claims["login"].(string)
-	} else {
-		return "", fmt.Errorf("Invalid token claims")
-	}
-
-	return login, nil
-}
-
 // ПЕРЕДЕЛАТЬ, ВМЕСТО МАПЫ БАЗУ ДАННЫХ
-func ReceiveResult(w http.ResponseWriter, r *http.Request) { // агент отправляет выражение на эндпоинт /receiveresult/ и оно изменяется в мапе MapOfEspressions, Агенту, решившему и отправившему результат присваивается статус online
+func ReceiveResult(w http.ResponseWriter, r *http.Request) { // /receiveresult/ агент отправляет выражение на эндпоинт /receiveresult/ и оно изменяется в мапе MapOfEspressions, Агенту, решившему и отправившему результат присваивается статус online
 	result := r.URL.Query().Get("Result")
 	id := r.URL.Query().Get("Id")
 	port := r.URL.Query().Get("AgentPort")
-	//jwtCookie, _ := r.Cookie("jwt_token")
 	intid, _ := strconv.Atoi(id)
 	fmt.Println(result, id)
 	MapOfExpressions[intid] = Expression{Text: MapOfExpressions[intid].Text, Id: MapOfExpressions[intid].Id, Status: "solved", Result: result}
@@ -176,6 +147,7 @@ func AddAgent(w http.ResponseWriter, r *http.Request) { // /addagent/ функц
 		ListOfAgents = append(ListOfAgents, Agent{Port: port, Status: "notresponding", NotResponded: 0, Display: true})
 		http.Redirect(w, r, "/agents/", http.StatusSeeOther)
 	}
+
 }
 
 // ПЕРЕДЕЛАТЬ, ВМЕСТО МАПЫ БАЗУ ДАННЫХ
@@ -254,7 +226,7 @@ func mainSolver() { // функция, которая непрерыванол �
 }
 
 // ПЕРЕДЕЛАТЬ, ВМЕСТО МАПЫ БАЗУ ДАННЫХ
-//func main() {
+func main() {
 	OrchestraPort = os.Args[1] // через os.args задаётся порт, на котором будет работать оркестратор
 	fmt.Println(OrchestraPort)
 	if OrchestraPort == "" {
