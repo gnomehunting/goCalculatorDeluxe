@@ -208,6 +208,7 @@ func mainSolver() { // функция, которая непрерыванол �
 							textwithreplacements = strings.ReplaceAll(textwithreplacements, "+", "%2B")
 							textwithreplacements = strings.ReplaceAll(textwithreplacements, "/", "%2F")
 							addr := fmt.Sprintf("http://127.0.0.1:%s/solve/?Expression=%s&Id=%s&ExecutionTimings=%s!%s!%s!%s", ListOfAgents[j].Port, textwithreplacements, MapOfExpressions[i].Id, newTimings.Plus, newTimings.Minus, newTimings.Multiply, newTimings.Divide)
+							fmt.Println(addr)
 							_, err := http.Get(addr)
 							if err != nil {
 								fmt.Println(err)

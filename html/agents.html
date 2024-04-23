@@ -6,6 +6,7 @@
 </head>
 <body>
     {{$fromcontextUsername := .Username}}
+    {{$fromcontextToShow := .ShowFor}}
     <h1><a href="/calculator/" >Calculator</a> &nbsp
         <a href="/timings/" >Timings</a> &nbsp
         <a href="/agents/" >Agent Monitoring </a>
@@ -18,8 +19,8 @@
     <h3>
     <ul id="item-list">
         {{range .List}}
-            {{if ne .Status "dead"}}
-                <li> Port: {{.Port}}  &nbsp; Status: {{.Status}} <br>
+            {{if gt $fromcontextToShow .NotRespondedFor}} 
+                <li> Id: {{.AgentID}}  &nbsp; Port: {{.Port}}  &nbsp; Status: {{.Status}} <br>
                 Times not responded: {{.NotRespondedFor}} <br></li>
             {{end}}
         {{end}}

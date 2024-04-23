@@ -41,7 +41,7 @@ func evalWithDelay(expr string, timings []string) (result float64) { // функ
 }
 
 func sendToOrchestraByGet(res float64) { // функция, необходимая для работы solve, отправляет решённое выражение орекстратору
-	addr := fmt.Sprintf("http://127.0.0.1:%s/receiveresult/?Result=%.3f&Id=%s&AgentPort=%s", ConnectedTo, Result, Id, AgentPort)
+	addr := fmt.Sprintf("http://localhost:%s/receiveresult/?Result=%.3f&Id=%s&AgentPort=%s", ConnectedTo, Result, Id, AgentPort)
 	fmt.Println(addr)
 	_, _ = http.Get(addr)
 }
@@ -57,6 +57,8 @@ func Solve(w http.ResponseWriter, r *http.Request) { // /solve/ получает
 	Id = r.URL.Query().Get("Id")
 	ExecutionTimings := strings.Split(r.URL.Query().Get("ExecutionTimings"), "!")
 	go func() {
+		fmt.Println("started solving")
+		fmt.Println(Expression, ExecutionTimings)
 		Result = evalWithDelay(Expression, ExecutionTimings)
 		sendToOrchestraByGet(Result)
 		fmt.Println("finished solving")
