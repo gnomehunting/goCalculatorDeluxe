@@ -19,6 +19,11 @@ func TestIsValidExpression(t *testing.T) {
 	if !isValidExpression("1+2*3-1") {
 		t.Errorf("Expected expression to be invalid due to mismatched operators")
 	}
+
+	// Дополнительный тест с правильным выражением
+	if !isValidExpression("4*(5-2)+3/1") {
+		t.Errorf("Expected expression to be valid")
+	}
 }
 
 func TestExtractDataFromCookie(t *testing.T) {
@@ -38,6 +43,12 @@ func TestExtractDataFromCookie(t *testing.T) {
 	if err == nil {
 		t.Errorf("Expected error for invalid token")
 	}
+
+	// Дополнительный тест с некорректным токеном
+	_, _, err = extractDataFromCookie("")
+	if err == nil {
+		t.Errorf("Expected error for empty token")
+	}
 }
 
 func TestGenerateJWTToken(t *testing.T) {
@@ -48,10 +59,12 @@ func TestGenerateJWTToken(t *testing.T) {
 	if err != nil || token == "" {
 		t.Errorf("Expected valid JWT token to be generated")
 	}
+
 }
 
 func TestGetTimingsByExpression(t *testing.T) {
 	EXAMPLEuserList = append(EXAMPLEuserList, User{0, "username", "password", 1, 2, 3, 4, 5})
+
 	// Тест на получение временных параметров по имени пользователя
 	expr := Expression{UserName: "username"}
 	plus, minus, mu, div, toshow := getTimingsByExpression(expr)
@@ -59,5 +72,14 @@ func TestGetTimingsByExpression(t *testing.T) {
 	// Проверка соответствия временных параметров пользователя
 	if plus != "1" || minus != "2" || mu != "3" || div != "4" || toshow != "5" {
 		t.Errorf("Expected timings to match user's data")
+	}
+
+	// Дополнительный тест на получение временных параметров по другому имени пользователя
+	expr = Expression{UserName: "otheruser"}
+	plus, minus, mu, div, toshow = getTimingsByExpression(expr)
+
+	// Проверка соответствия временных параметров другого пользователя
+	if plus != "" || minus != "" || mu != "" || div != "" || toshow != "" {
+		t.Errorf("Expected empty timings for non-existing user")
 	}
 }

@@ -166,10 +166,19 @@ func RegisterUser(w http.ResponseWriter, r *http.Request) {
 		username := r.FormValue("username")
 		password := r.FormValue("password")
 		doneedtoadd := true
+
+		// Проверка на пустые поля username и password
+		if username == "" || password == "" {
+			doneedtoadd = false
+			http.Redirect(w, r, "/register/", http.StatusSeeOther)
+			return
+		}
+
 		for _, user := range EXAMPLEuserList {
 			if user.UserName == username {
 				doneedtoadd = false
 				http.Redirect(w, r, "/register/", http.StatusSeeOther)
+				return
 			}
 		}
 		if doneedtoadd {
