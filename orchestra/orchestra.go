@@ -32,7 +32,7 @@ type Expression struct {
 	ExpressionText   string `db:"EXPRESSION_TEXT"`
 	Status           string `db:"STATUS"`
 	UserName         string `db:"USER_NAME"`
-	ExpressionResult string `db:EXPRESSION_RESULT`
+	ExpressionResult string `db:"EXPRESSION_RESULT"`
 }
 
 type Agent struct {
