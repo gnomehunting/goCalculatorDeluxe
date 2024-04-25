@@ -265,9 +265,12 @@ func ReceiveResult(w http.ResponseWriter, r *http.Request) {
 
 	for i := 0; i < len(EXAMPLEexpressionList); i++ {
 		if EXAMPLEexpressionList[i].ExpressionID == intid {
-			EXAMPLEexpressionList[i].ExpressionResult = result
-			EXAMPLEexpressionList[i].Status = "solved"
-			break
+			if EXAMPLEexpressionList[i].Status == "solving" {
+				EXAMPLEexpressionList[i].ExpressionResult = result
+				EXAMPLEexpressionList[i].Status = "solved"
+				break
+			}
+
 		}
 
 	}
@@ -285,14 +288,25 @@ func AddExpression(w http.ResponseWriter, r *http.Request) {
 	user := r.Context().Value("user").(User)
 	txt := r.FormValue("item")
 	needtoadd := true
+	needtoaddsameforanotheruser := false
+	thisexpression := Expression{}
 	username := user.UserName
-	//for i := range EXAMPLEexpressionList {
-	//	if EXAMPLEexpressionList[i].ExpressionText == txt {
-	//		needtoadd = false
-	//	}
-	//} тут надо сделать проверку, есть ли у юзера, а не в общем в программе такое выражение и не доблавлять его если есть, но.... зачем?
+	//этот фор может быть сомнителенг
+	for i := range EXAMPLEexpressionList {
+		if EXAMPLEexpressionList[i].ExpressionText == txt {
+			if EXAMPLEexpressionList[i].UserName == username {
+				needtoadd = false
+			} else {
+				needtoaddsameforanotheruser = true
+				thisexpression = EXAMPLEexpressionList[i]
+			}
+			break
+		}
+	}
 	if needtoadd {
-		if isValidExpression(txt) {
+		if needtoaddsameforanotheruser {
+			EXAMPLEexpressionList = append(EXAMPLEexpressionList, Expression{ExpressionText: thisexpression.ExpressionText, ExpressionID: len(EXAMPLEexpressionList), ExpressionResult: thisexpression.ExpressionResult, Status: thisexpression.Status, UserName: username})
+		} else if isValidExpression(txt) {
 			EXAMPLEexpressionList = append(EXAMPLEexpressionList, Expression{ExpressionText: txt, ExpressionID: len(EXAMPLEexpressionList), ExpressionResult: "0", Status: "unsolved", UserName: username})
 		} else {
 			EXAMPLEexpressionList = append(EXAMPLEexpressionList, Expression{ExpressionText: txt, ExpressionID: len(EXAMPLEexpressionList), ExpressionResult: "0", Status: "invalid", UserName: username})
