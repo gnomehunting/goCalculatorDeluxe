@@ -118,7 +118,7 @@ func extractDataFromCookie(jwtCookie string) (username, password string, err err
 
 	return username, password, nil
 }
-func generateJWTToken(username, password string) (string, error) {
+func generateJWTToken(username, password string) (string, error) { //создание jwt токена
 	// Создаем новый токен
 	token := jwt.New(jwt.SigningMethodHS256)
 
@@ -136,7 +136,7 @@ func generateJWTToken(username, password string) (string, error) {
 
 	return tokenString, nil
 }
-func getTimingsByExpression(expr Expression) (plus, minus, mu, div, toshow string) {
+func getTimingsByExpression(expr Expression) (plus, minus, mu, div, toshow string) { //достаёт тайминги из юзера с помошью поля UserName у выражения
 	for _, user := range EXAMPLEuserList {
 		if user.UserName == expr.UserName {
 			plus, minus, mu, div, toshow = strconv.Itoa(user.PlusTiming), strconv.Itoa(user.MinusTiming), strconv.Itoa(user.MultiplyTiming), strconv.Itoa(user.DivideTiming), strconv.Itoa(user.ToShowTiming)
@@ -150,18 +150,18 @@ func getTimingsByExpression(expr Expression) (plus, minus, mu, div, toshow strin
 //REGISTRATION & LOGIN
 ///////////////////////////////////////////
 
-func LoginHandler(w http.ResponseWriter, r *http.Request) {
+func LoginHandler(w http.ResponseWriter, r *http.Request) { // отрисовка страницы с логином
 	tmpl := template.Must(template.ParseFiles("html/login.html"))
 	tmpl.Execute(w, nil)
 
 }
 
-func RegistrationHandler(w http.ResponseWriter, r *http.Request) {
+func RegistrationHandler(w http.ResponseWriter, r *http.Request) { // отрисовка страницы с регистрацией
 	tmpl := template.Must(template.ParseFiles("html/registration.html"))
 	tmpl.Execute(w, nil)
 }
 
-func RegisterUser(w http.ResponseWriter, r *http.Request) {
+func RegisterUser(w http.ResponseWriter, r *http.Request) { //регистрация пользователя, проверяется, ненулевые ли поля, есть ли такой юзер, если всё нормально - создаёт нового пользователя
 	if r.Method == http.MethodPost {
 		username := r.FormValue("username")
 		password := r.FormValue("password")
@@ -188,7 +188,7 @@ func RegisterUser(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func LoginUser(w http.ResponseWriter, r *http.Request) {
+func LoginUser(w http.ResponseWriter, r *http.Request) { //логин пользователя, проверяет, есть ли такой пользователь, если да - даёт ему кики с jwt токеном на час
 	if r.Method == http.MethodPost {
 		username := r.FormValue("username")
 		password := r.FormValue("password")
@@ -203,9 +203,9 @@ func LoginUser(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func SetCookieMiddleware(w http.ResponseWriter, username, password string) { //also adds user to users
+func SetCookieMiddleware(w http.ResponseWriter, username, password string) { //создаёт jwt токен ввышеописанной функцией и добавляет его в куки пользователю
 	jwtToken, _ := generateJWTToken(username, password)
-	validCookies = append(validCookies, jwtToken) //!!!!!!!!!!!!!!!! ПЕРЕДЕЛАТЬ ДОБАВЛЕНИЕ В ДБ, ВОЗМОЖНО ПОНАДРОБИТСЯ ФУНКЦИЯ
+	validCookies = append(validCookies, jwtToken)
 
 	// Создаем cookie для jwt_token
 	jwtCookie := &http.Cookie{
@@ -216,18 +216,9 @@ func SetCookieMiddleware(w http.ResponseWriter, username, password string) { //a
 	}
 	http.SetCookie(w, jwtCookie)
 
-	// Создаем cookie для username
-	/*usernameCookie := &http.Cookie{
-		Name:   "username",
-		Value:  username,
-		Path:   "/",
-		Domain: "localhost",
-	}
-	http.SetCookie(w, usernameCookie)*/
 }
 
-// http.HandleFunc("/<youraddr>", CheckCookieMiddleware(<yourfunc>, validCookies))
-func CheckCookieMiddleware(next http.HandlerFunc, validCookies *[]string) http.HandlerFunc {
+func CheckCookieMiddleware(next http.HandlerFunc, validCookies *[]string) http.HandlerFunc { // middleware, которое проверяет, есть ли у пользователя jwt, проверяет его на правильность и кладёт структуру с данными о юзере в контекст
 	return func(w http.ResponseWriter, r *http.Request) {
 		cookie, err := r.Cookie("jwt_token")
 		if err != nil || !slices.Contains(*validCookies, cookie.Value) {
@@ -256,7 +247,7 @@ func CheckCookieMiddleware(next http.HandlerFunc, validCookies *[]string) http.H
 //CALCULATOR
 ///////////////////////////////////////////
 
-func ReceiveResult(w http.ResponseWriter, r *http.Request) {
+func ReceiveResult(w http.ResponseWriter, r *http.Request) { //получение результата от агента
 	result := r.URL.Query().Get("Result")
 	id := r.URL.Query().Get("Id")
 	port := r.URL.Query().Get("AgentPort")
@@ -284,14 +275,14 @@ func ReceiveResult(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func AddExpression(w http.ResponseWriter, r *http.Request) {
+func AddExpression(w http.ResponseWriter, r *http.Request) { //добавление введённого юзером выражения, выражения могут повторяться, но только у разных юзеров
 	user := r.Context().Value("user").(User)
 	txt := r.FormValue("item")
 	needtoadd := true
 	needtoaddsameforanotheruser := false
 	thisexpression := Expression{}
 	username := user.UserName
-	//этот фор может быть сомнителенг
+	//этот фор может быть сомнителен
 	for i := range EXAMPLEexpressionList {
 		if EXAMPLEexpressionList[i].ExpressionText == txt {
 			if EXAMPLEexpressionList[i].UserName == username {
@@ -316,7 +307,7 @@ func AddExpression(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/calculator/", http.StatusSeeOther)
 }
 
-func CalculatorPage(w http.ResponseWriter, r *http.Request) { // /calculator/ отрисовка страницы калькулятор, в темплейт передаётся мапа выражений
+func CalculatorPage(w http.ResponseWriter, r *http.Request) { // отрисовка страницы калькулятор, в темплейт передаётся список выражений и пользователь, под чьим логином произведён вход
 	tmpl := template.Must(template.ParseFiles("html/calculator.html"))
 	user := r.Context().Value("user").(User)
 	data := TemplateExpressionsData{
@@ -324,10 +315,9 @@ func CalculatorPage(w http.ResponseWriter, r *http.Request) { // /calculator/ о
 		Username: user.UserName,
 	}
 	tmpl.Execute(w, data)
-	//делается запрос в дб, он требует выражения, у которых username == cookie.username, и список с ними отправляется в темплейт
 }
 
-func ChangeTimings(w http.ResponseWriter, r *http.Request) {
+func ChangeTimings(w http.ResponseWriter, r *http.Request) { //меняет тайминги у юзера
 	user := r.Context().Value("user").(User)
 	username := user.UserName
 	plus, err1 := strconv.Atoi(r.FormValue("plu"))
@@ -359,7 +349,7 @@ func ChangeTimings(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/timings/", http.StatusSeeOther)
 }
 
-func TimingsPage(w http.ResponseWriter, r *http.Request) { // /timings/ отрисовка страницы с таймингами, в темплейт передаются тайминги
+func TimingsPage(w http.ResponseWriter, r *http.Request) { // /timings/ отрисовка страницы с таймингами, в темплейт передаётся список юзеров и пользователь, под чьим логином произведён вход
 	tmpl := template.Must(template.ParseFiles("html/timings.html"))
 	tmpl.Execute(w, EXAMPLEuserList)
 	user := r.Context().Value("user").(User)
@@ -371,7 +361,7 @@ func TimingsPage(w http.ResponseWriter, r *http.Request) { // /timings/ отри
 	//делается запрос в дб, он требует пользователей, у которых username == cookie.username, его тайминги
 }
 
-func AddAgent(w http.ResponseWriter, r *http.Request) {
+func AddAgent(w http.ResponseWriter, r *http.Request) { //добавление нового агента пользователем
 	port := r.FormValue("agentport")
 	doneedtoadd := true
 	_, err := strconv.Atoi(port)
@@ -392,7 +382,7 @@ func AddAgent(w http.ResponseWriter, r *http.Request) {
 	//добавляется агент в дб(юзер вводит порт)
 }
 
-func AgentsPage(w http.ResponseWriter, r *http.Request) { // /agents/ отрисовка страницы с агентами, в темплейт передаётся список агентов
+func AgentsPage(w http.ResponseWriter, r *http.Request) { // /agents/ отрисовка страницы с агентами, в темплейт передаётся список агентов и пользователь, под чьим логином произведён вход
 	tmpl := template.Must(template.ParseFiles("html/agents.html"))
 	tmpl.Execute(w, EXAMPLEagentList)
 	user := r.Context().Value("user").(User)
@@ -430,18 +420,12 @@ func heartbeat() {
 				}
 			}
 			time.Sleep(time.Second)
-			//надо реализовать время показа/непоказа на уровне клиента
 		}
 	}
 
 }
-func ResetAgent() {
-	//обнуляем агента
-}
-func dbPuller() {
-} //берём всё из дб, раскидываем по спискам, всем агентам присылаем приказ обнулиться
 
-func solver() {
+func solver() { //пробегается по агентам и выражениям, если есть свободные и нерешённые - отправляет агентам выражения
 	for {
 		time.Sleep(time.Second)
 		if len(EXAMPLEexpressionList) != 0 && len(EXAMPLEagentList) != 0 {
