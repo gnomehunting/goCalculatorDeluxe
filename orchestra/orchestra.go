@@ -28,11 +28,12 @@ type User struct {
 }
 
 type Expression struct {
-	ExpressionID     int    `db:"EXPRESSION_ID"`
-	ExpressionText   string `db:"EXPRESSION_TEXT"`
-	Status           string `db:"STATUS"`
-	UserName         string `db:"USER_NAME"`
-	ExpressionResult string `db:"EXPRESSION_RESULT"`
+	ExpressionID      int    `db:"EXPRESSION_ID"`
+	ExpressionText    string `db:"EXPRESSION_TEXT"`
+	Status            string `db:"STATUS"`
+	UserName          string `db:"USER_NAME"`
+	ExpressionResult  string `db:"EXPRESSION_RESULT"`
+	BeingSolvedByPort string `db:"BEING_SOLVED_BY_PORT"`
 }
 
 type Agent struct {
@@ -296,11 +297,11 @@ func AddExpression(w http.ResponseWriter, r *http.Request) { //добавлен�
 	}
 	if needtoadd {
 		if needtoaddsameforanotheruser {
-			EXAMPLEexpressionList = append(EXAMPLEexpressionList, Expression{ExpressionText: thisexpression.ExpressionText, ExpressionID: len(EXAMPLEexpressionList), ExpressionResult: thisexpression.ExpressionResult, Status: thisexpression.Status, UserName: username})
+			EXAMPLEexpressionList = append(EXAMPLEexpressionList, Expression{ExpressionText: thisexpression.ExpressionText, ExpressionID: len(EXAMPLEexpressionList), ExpressionResult: thisexpression.ExpressionResult, Status: thisexpression.Status, UserName: username, BeingSolvedByPort: ""})
 		} else if isValidExpression(txt) {
-			EXAMPLEexpressionList = append(EXAMPLEexpressionList, Expression{ExpressionText: txt, ExpressionID: len(EXAMPLEexpressionList), ExpressionResult: "0", Status: "unsolved", UserName: username})
+			EXAMPLEexpressionList = append(EXAMPLEexpressionList, Expression{ExpressionText: txt, ExpressionID: len(EXAMPLEexpressionList), ExpressionResult: "0", Status: "unsolved", UserName: username, BeingSolvedByPort: ""})
 		} else {
-			EXAMPLEexpressionList = append(EXAMPLEexpressionList, Expression{ExpressionText: txt, ExpressionID: len(EXAMPLEexpressionList), ExpressionResult: "0", Status: "invalid", UserName: username})
+			EXAMPLEexpressionList = append(EXAMPLEexpressionList, Expression{ExpressionText: txt, ExpressionID: len(EXAMPLEexpressionList), ExpressionResult: "0", Status: "invalid", UserName: username, BeingSolvedByPort: ""})
 		}
 	}
 	fmt.Println(EXAMPLEexpressionList)
@@ -365,9 +366,14 @@ func AddAgent(w http.ResponseWriter, r *http.Request) { //добавление �
 	port := r.FormValue("agentport")
 	doneedtoadd := true
 	_, err := strconv.Atoi(port)
-	for _, agent := range EXAMPLEagentList {
+	for i, agent := range EXAMPLEagentList {
 		if agent.Port == port {
 			doneedtoadd = false
+			if agent.Status == "dead" {
+				EXAMPLEagentList[i].Status = "online"
+				EXAMPLEagentList[i].NotRespondedFor = 0
+			}
+			break
 		}
 	}
 	if err != nil || !doneedtoadd {
@@ -376,7 +382,9 @@ func AddAgent(w http.ResponseWriter, r *http.Request) { //добавление �
 	} else {
 		addr := fmt.Sprintf("http://localhost:%s/connect/?HostPort=%s", port, OrchestraPort)
 		_, _ = http.Get(addr)
-		EXAMPLEagentList = append(EXAMPLEagentList, Agent{Port: port, Status: "notresponding", NotRespondedFor: 0, AgentID: len(EXAMPLEagentList)})
+
+		EXAMPLEagentList = append(EXAMPLEagentList, Agent{Port: port, Status: "online", NotRespondedFor: 0, AgentID: len(EXAMPLEagentList)})
+
 		http.Redirect(w, r, "/agents/", http.StatusSeeOther)
 	}
 	//добавляется агент в дб(юзер вводит порт)
@@ -402,7 +410,7 @@ func heartbeat() {
 				if EXAMPLEagentList[i].NotRespondedFor >= 1 {
 					EXAMPLEagentList[i].Status = "notresponding"
 				}
-				if EXAMPLEagentList[i].NotRespondedFor >= 60 {
+				if EXAMPLEagentList[i].NotRespondedFor >= 30 {
 					EXAMPLEagentList[i].Status = "dead"
 				}
 				if EXAMPLEagentList[i].Status != "dead" {
@@ -446,6 +454,7 @@ func solver() { //пробегается по агентам и выражени
 							} else {
 								EXAMPLEexpressionList[i].Status = "solving"
 								EXAMPLEagentList[j].Status = "busy"
+								EXAMPLEexpressionList[i].BeingSolvedByPort = EXAMPLEagentList[j].Port
 							}
 
 						}
@@ -453,6 +462,21 @@ func solver() { //пробегается по агентам и выражени
 				}
 			}
 		}
+	}
+}
+func agentChecker() {
+	for {
+		for i := range EXAMPLEexpressionList {
+			for j := range EXAMPLEagentList {
+				if EXAMPLEexpressionList[i].Status == "solving" {
+					if EXAMPLEexpressionList[i].BeingSolvedByPort == EXAMPLEagentList[j].Port && EXAMPLEagentList[j].Status == "notresponding" {
+						EXAMPLEexpressionList[i].Status = "unsolved"
+						EXAMPLEexpressionList[i].BeingSolvedByPort = ""
+					}
+				}
+			}
+		}
+		time.Sleep(time.Second)
 	}
 }
 
@@ -464,6 +488,7 @@ func main() {
 	}
 	go heartbeat()
 	go solver()
+	go agentChecker()
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/login/", http.StatusSeeOther)
 	})
