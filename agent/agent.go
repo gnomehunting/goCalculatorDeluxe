@@ -43,7 +43,10 @@ func evalWithDelay(expr string, timings []string) (result float64) { // функ
 func sendToOrchestraByGet(res float64) { // функция, необходимая для работы solve, отправляет решённое выражение орекстратору
 	addr := fmt.Sprintf("http://localhost:%s/receiveresult/?Result=%.3f&Id=%s&AgentPort=%s", ConnectedTo, Result, Id, AgentPort)
 	fmt.Println(addr)
-	_, _ = http.Get(addr)
+	_, err := http.Get(addr)
+	if err != nil {
+		fmt.Println(err)
+	}
 }
 
 func Connect(w http.ResponseWriter, r *http.Request) { // /connect/ орекстр делает гет запрос сюда, чтобы дать агенту знать о порте оркестра

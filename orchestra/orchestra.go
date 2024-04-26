@@ -42,6 +42,9 @@ type Agent struct {
 	Port            string `db:"PORT"`
 	NotRespondedFor int    `db:"NOT_RESPONDED_FOR"`
 }
+
+// может быть, я реализую дб
+
 type TemplateAgentData struct {
 	List     []Agent
 	Username string
@@ -63,6 +66,8 @@ type UserCredentials struct {
 	Password string
 }
 
+// структуры, для передачи в темплейт
+
 var (
 	secretkey             = []byte("supersecretkey")
 	validCookies          = []string{}
@@ -71,6 +76,8 @@ var (
 	EXAMPLEuserList       = []User{}
 	OrchestraPort         = ""
 )
+
+//переменные
 
 ///////////////////////////////////////////
 //INSTRUMENTARY FUNCTIONS
@@ -151,24 +158,23 @@ func getTimingsByExpression(expr Expression) (plus, minus, mu, div, toshow strin
 //REGISTRATION & LOGIN
 ///////////////////////////////////////////
 
-func LoginHandler(w http.ResponseWriter, r *http.Request) { // отрисовка страницы с логином
+func LoginHandler(w http.ResponseWriter, r *http.Request) { // /login/ отрисовка страницы с логином
 	tmpl := template.Must(template.ParseFiles("html/login.html"))
 	tmpl.Execute(w, nil)
 
 }
 
-func RegistrationHandler(w http.ResponseWriter, r *http.Request) { // отрисовка страницы с регистрацией
+func RegistrationHandler(w http.ResponseWriter, r *http.Request) { // /registration/ отрисовка страницы с регистрацией
 	tmpl := template.Must(template.ParseFiles("html/registration.html"))
 	tmpl.Execute(w, nil)
 }
 
-func RegisterUser(w http.ResponseWriter, r *http.Request) { //регистрация пользователя, проверяется, ненулевые ли поля, есть ли такой юзер, если всё нормально - создаёт нового пользователя
+func RegisterUser(w http.ResponseWriter, r *http.Request) { //регистрация пользователя, проверяется, ненулевые ли поля и есть ли такой юзер, если всё нормально - создаёт нового пользователя
 	if r.Method == http.MethodPost {
 		username := r.FormValue("username")
 		password := r.FormValue("password")
 		doneedtoadd := true
 
-		// Проверка на пустые поля username и password
 		if username == "" || password == "" {
 			doneedtoadd = false
 			http.Redirect(w, r, "/register/", http.StatusSeeOther)
@@ -189,7 +195,7 @@ func RegisterUser(w http.ResponseWriter, r *http.Request) { //регистрац
 	}
 }
 
-func LoginUser(w http.ResponseWriter, r *http.Request) { //логин пользователя, проверяет, есть ли такой пользователь, если да - даёт ему кики с jwt токеном на час
+func LoginUser(w http.ResponseWriter, r *http.Request) { //логин пользователя, проверяет, есть ли такой пользователь, если да - даёт ему куки с jwt токеном на час
 	if r.Method == http.MethodPost {
 		username := r.FormValue("username")
 		password := r.FormValue("password")
@@ -283,7 +289,6 @@ func AddExpression(w http.ResponseWriter, r *http.Request) { //добавлен�
 	needtoaddsameforanotheruser := false
 	thisexpression := Expression{}
 	username := user.UserName
-	//этот фор может быть сомнителен
 	for i := range EXAMPLEexpressionList {
 		if EXAMPLEexpressionList[i].ExpressionText == txt {
 			if EXAMPLEexpressionList[i].UserName == username {
@@ -308,7 +313,7 @@ func AddExpression(w http.ResponseWriter, r *http.Request) { //добавлен�
 	http.Redirect(w, r, "/calculator/", http.StatusSeeOther)
 }
 
-func CalculatorPage(w http.ResponseWriter, r *http.Request) { // отрисовка страницы калькулятор, в темплейт передаётся список выражений и пользователь, под чьим логином произведён вход
+func CalculatorPage(w http.ResponseWriter, r *http.Request) { // /calculator/ отрисовка страницы калькулятор, в темплейт передаётся список выражений и пользователь, под чьим логином произведён вход
 	tmpl := template.Must(template.ParseFiles("html/calculator.html"))
 	user := r.Context().Value("user").(User)
 	data := TemplateExpressionsData{
@@ -359,7 +364,6 @@ func TimingsPage(w http.ResponseWriter, r *http.Request) { // /timings/ отри
 		Username: user.UserName,
 	}
 	tmpl.Execute(w, data)
-	//делается запрос в дб, он требует пользователей, у которых username == cookie.username, его тайминги
 }
 
 func AddAgent(w http.ResponseWriter, r *http.Request) { //добавление нового агента пользователем
@@ -387,7 +391,6 @@ func AddAgent(w http.ResponseWriter, r *http.Request) { //добавление �
 
 		http.Redirect(w, r, "/agents/", http.StatusSeeOther)
 	}
-	//добавляется агент в дб(юзер вводит порт)
 }
 
 func AgentsPage(w http.ResponseWriter, r *http.Request) { // /agents/ отрисовка страницы с агентами, в темплейт передаётся список агентов и пользователь, под чьим логином произведён вход
@@ -402,8 +405,7 @@ func AgentsPage(w http.ResponseWriter, r *http.Request) { // /agents/ отрис
 	tmpl.Execute(w, data)
 }
 
-func heartbeat() {
-	//всем подключенным агентам отправляется хартбит через цикл фор, те, кто не принял - not responding
+func heartbeat() { //всем подключенным агентам отправляется хартбит через цикл фор, те, кто не принял - not responding
 	for {
 		if len(EXAMPLEagentList) != 0 {
 			for i, agent := range EXAMPLEagentList {
@@ -464,7 +466,7 @@ func solver() { //пробегается по агентам и выражени
 		}
 	}
 }
-func agentChecker() {
+func agentChecker() { //проверяет, есть ли выражения, которые числятся решающимися, но решающий их агент - оффлайн
 	for {
 		for i := range EXAMPLEexpressionList {
 			for j := range EXAMPLEagentList {
@@ -481,7 +483,7 @@ func agentChecker() {
 }
 
 func main() {
-	OrchestraPort = os.Args[1] // через os.args задаётся порт, на котором будет работать оркестратор
+	OrchestraPort = ":" + os.Args[1] // через os.args задаётся порт, на котором будет работать оркестратор
 	fmt.Println(OrchestraPort)
 	if OrchestraPort == "" {
 		log.Fatal("PORT not set")
@@ -506,5 +508,5 @@ func main() {
 	http.HandleFunc("/agents/", CheckCookieMiddleware(AgentsPage, &validCookies))
 	http.HandleFunc("/calculator/", CheckCookieMiddleware(CalculatorPage, &validCookies))
 	http.HandleFunc("/timings/", CheckCookieMiddleware(TimingsPage, &validCookies))
-	http.ListenAndServe(":8080", nil)
+	http.ListenAndServe(OrchestraPort, nil)
 }
