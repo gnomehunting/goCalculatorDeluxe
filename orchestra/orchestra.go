@@ -2,14 +2,19 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"io/ioutil"
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
 	"regexp"
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
+	"syscall"
 	"text/template"
 	"time"
 
@@ -43,8 +48,16 @@ type Agent struct {
 	NotRespondedFor int    `db:"NOT_RESPONDED_FOR"`
 }
 
-// может быть, я реализую дб
+type SharedData struct { // аналог дб, но её я вряд ли реализую)
+	ValidCookies   []string     `json:"ValidCookies"`
+	AgentList      []Agent      `json:"AgentList"`
+	ExpressionList []Expression `json:"ExpressionList"`
+	UserList       []User       `json:"UserList"`
+	Mu             sync.Mutex   `json:"Mu"`
+	FileName       string       `json:"FileName"`
+}
 
+// структуры для работы программы и персистентности
 type TemplateAgentData struct {
 	List     []Agent
 	Username string
@@ -69,15 +82,86 @@ type UserCredentials struct {
 // структуры, для передачи в темплейт
 
 var (
-	secretkey             = []byte("supersecretkey")
-	validCookies          = []string{}
-	EXAMPLEagentList      = []Agent{}
-	EXAMPLEexpressionList = []Expression{}
-	EXAMPLEuserList       = []User{}
-	OrchestraPort         = ""
+	secretkey     = []byte("supersecretkey") // ключ для jwt токена
+	OrchestraPort = ""                       // порт оркестратора
+	datapath      = "data/shared_data.json"  //путь к json с сохранёнными данными
 )
 
-//переменные
+// /////////////////////////////////////////
+// PERSISTENCY FUNCTIONS
+// /////////////////////////////////////////
+
+func createJSONFileIfNotExist(FileName string) error { //создание json файла с содержанием {} по пути datapath, если его не существует
+	if _, err := os.Stat(FileName); err == nil {
+		return nil
+	} else if !os.IsNotExist(err) {
+		return err
+	}
+	file, err := os.Create(FileName)
+	if err != nil {
+		return fmt.Errorf("failed to create file: %w", err)
+	}
+	defer file.Close()
+
+	_, err = file.WriteString("{}")
+	if err != nil {
+		return fmt.Errorf("failed to write data to file: %w", err)
+	}
+
+	return nil
+}
+
+func NewSharedData(FileName string) (*SharedData, error) { //берёт информацию из json файла и помещает его в структуру SharedData
+	data := &SharedData{
+		FileName: FileName,
+	}
+	// Load data from file if it exists
+	if err := data.loadFromFile(); err != nil {
+		// File might not exist, which is okay for initial creation
+		if !os.IsNotExist(err) {
+			return nil, fmt.Errorf("failed to load data from file: %w", err)
+		}
+	}
+	return data, nil
+}
+
+func (sd *SharedData) saveToFile() error { //сохраняет информацию из структуры SharedData в файл
+	sd.Mu.Lock()
+	defer sd.Mu.Unlock()
+
+	data, err := json.Marshal(sd)
+	if err != nil {
+		return fmt.Errorf("failed to marshal data: %w", err)
+	}
+
+	file, err := os.Create(sd.FileName)
+	if err != nil {
+		return fmt.Errorf("failed to create file: %w", err)
+	}
+	defer file.Close()
+
+	_, err = file.Write(data)
+	if err != nil {
+		return fmt.Errorf("failed to write data to file: %w", err)
+	}
+
+	return nil
+}
+
+func (sd *SharedData) loadFromFile() error { // для функции NewSharedData
+	sd.Mu.Lock()
+	defer sd.Mu.Unlock()
+
+	data, err := ioutil.ReadFile(sd.FileName)
+	if err != nil {
+		return fmt.Errorf("failed to read data from file: %w", err)
+	}
+	err = json.Unmarshal(data, sd)
+	if err != nil {
+		return fmt.Errorf("failed to unmarshal data: %w", err)
+	}
+	return nil
+}
 
 ///////////////////////////////////////////
 //INSTRUMENTARY FUNCTIONS
@@ -127,16 +211,11 @@ func extractDataFromCookie(jwtCookie string) (username, password string, err err
 	return username, password, nil
 }
 func generateJWTToken(username, password string) (string, error) { //создание jwt токена
-	// Создаем новый токен
 	token := jwt.New(jwt.SigningMethodHS256)
-
-	// Устанавливаем клеймы (полезную нагрузку) для токена
 	claims := token.Claims.(jwt.MapClaims)
 	claims["username"] = username
 	claims["password"] = password
 	claims["exp"] = time.Now().Add(time.Hour).Unix()
-
-	// Подписываем токен с секретным ключом
 	tokenString, err := token.SignedString(secretkey)
 	if err != nil {
 		return "", err
@@ -144,14 +223,14 @@ func generateJWTToken(username, password string) (string, error) { //созда�
 
 	return tokenString, nil
 }
-func getTimingsByExpression(expr Expression) (plus, minus, mu, div, toshow string) { //достаёт тайминги из юзера с помошью поля UserName у выражения
-	for _, user := range EXAMPLEuserList {
+func (sd *SharedData) getTimingsByExpression(expr Expression) (plus, minus, Mu, div, toshow string) { //достаёт тайминги из юзера с помошью поля UserName у выражения
+	for _, user := range sd.UserList {
 		if user.UserName == expr.UserName {
-			plus, minus, mu, div, toshow = strconv.Itoa(user.PlusTiming), strconv.Itoa(user.MinusTiming), strconv.Itoa(user.MultiplyTiming), strconv.Itoa(user.DivideTiming), strconv.Itoa(user.ToShowTiming)
+			plus, minus, Mu, div, toshow = strconv.Itoa(user.PlusTiming), strconv.Itoa(user.MinusTiming), strconv.Itoa(user.MultiplyTiming), strconv.Itoa(user.DivideTiming), strconv.Itoa(user.ToShowTiming)
 			break
 		}
 	}
-	return plus, minus, mu, div, toshow
+	return plus, minus, Mu, div, toshow
 }
 
 ///////////////////////////////////////////
@@ -169,7 +248,7 @@ func RegistrationHandler(w http.ResponseWriter, r *http.Request) { // /registrat
 	tmpl.Execute(w, nil)
 }
 
-func RegisterUser(w http.ResponseWriter, r *http.Request) { //регистрация пользователя, проверяется, ненулевые ли поля и есть ли такой юзер, если всё нормально - создаёт нового пользователя
+func (sd *SharedData) RegisterUser(w http.ResponseWriter, r *http.Request) { //регистрация пользователя, проверяется, ненулевые ли поля и есть ли такой юзер, если всё нормально - создаёт нового пользователя
 	if r.Method == http.MethodPost {
 		username := r.FormValue("username")
 		password := r.FormValue("password")
@@ -181,7 +260,7 @@ func RegisterUser(w http.ResponseWriter, r *http.Request) { //регистрац
 			return
 		}
 
-		for _, user := range EXAMPLEuserList {
+		for _, user := range sd.UserList {
 			if user.UserName == username {
 				doneedtoadd = false
 				http.Redirect(w, r, "/register/", http.StatusSeeOther)
@@ -189,20 +268,21 @@ func RegisterUser(w http.ResponseWriter, r *http.Request) { //регистрац
 			}
 		}
 		if doneedtoadd {
-			EXAMPLEuserList = append(EXAMPLEuserList, User{len(EXAMPLEuserList), username, password, 10, 10, 10, 10, 10})
+			sd.UserList = append(sd.UserList, User{len(sd.UserList), username, password, 10, 10, 10, 10, 10})
 		}
 		http.Redirect(w, r, "/login/", http.StatusSeeOther)
 	}
 }
 
-func LoginUser(w http.ResponseWriter, r *http.Request) { //логин пользователя, проверяет, есть ли такой пользователь, если да - даёт ему куки с jwt токеном на час
+func (sd *SharedData) LoginUser(w http.ResponseWriter, r *http.Request) { //логин пользователя, проверяет, есть ли такой пользователь, если да - даёт ему куки с jwt токеном на час
 	if r.Method == http.MethodPost {
 		username := r.FormValue("username")
 		password := r.FormValue("password")
-		for _, user := range EXAMPLEuserList {
+		for _, user := range sd.UserList {
 			if user.UserName == username && user.Password == password {
-				SetCookieMiddleware(w, username, password)
+				sd.SetCookieMiddleware(w, username, password)
 				http.Redirect(w, r, "/calculator/", http.StatusSeeOther)
+				return
 			}
 		}
 
@@ -210,9 +290,9 @@ func LoginUser(w http.ResponseWriter, r *http.Request) { //логин польз
 	}
 }
 
-func SetCookieMiddleware(w http.ResponseWriter, username, password string) { //создаёт jwt токен ввышеописанной функцией и добавляет его в куки пользователю
+func (sd *SharedData) SetCookieMiddleware(w http.ResponseWriter, username, password string) { //создаёт jwt токен ввышеописанной функцией и добавляет его в куки пользователю
 	jwtToken, _ := generateJWTToken(username, password)
-	validCookies = append(validCookies, jwtToken)
+	sd.ValidCookies = append(sd.ValidCookies, jwtToken)
 
 	// Создаем cookie для jwt_token
 	jwtCookie := &http.Cookie{
@@ -225,10 +305,10 @@ func SetCookieMiddleware(w http.ResponseWriter, username, password string) { //�
 
 }
 
-func CheckCookieMiddleware(next http.HandlerFunc, validCookies *[]string) http.HandlerFunc { // middleware, которое проверяет, есть ли у пользователя jwt, проверяет его на правильность и кладёт структуру с данными о юзере в контекст
+func (sd *SharedData) CheckCookieMiddleware(next http.HandlerFunc) http.HandlerFunc { // middleware, которое проверяет, есть ли у пользователя jwt, проверяет его на правильность и кладёт структуру с данными о юзере в контекст
 	return func(w http.ResponseWriter, r *http.Request) {
 		cookie, err := r.Cookie("jwt_token")
-		if err != nil || !slices.Contains(*validCookies, cookie.Value) {
+		if err != nil || !slices.Contains(sd.ValidCookies, cookie.Value) {
 			http.Redirect(w, r, "/login/", http.StatusSeeOther)
 			return
 		}
@@ -238,7 +318,7 @@ func CheckCookieMiddleware(next http.HandlerFunc, validCookies *[]string) http.H
 			return
 		}
 		userData := User{}
-		for _, user := range EXAMPLEuserList {
+		for _, user := range sd.UserList {
 			if user.UserName == username && user.Password == password {
 				userData = user
 				break
@@ -254,18 +334,18 @@ func CheckCookieMiddleware(next http.HandlerFunc, validCookies *[]string) http.H
 //CALCULATOR
 ///////////////////////////////////////////
 
-func ReceiveResult(w http.ResponseWriter, r *http.Request) { //получение результата от агента
+func (sd *SharedData) ReceiveResult(w http.ResponseWriter, r *http.Request) { //получение результата от агента
 	result := r.URL.Query().Get("Result")
 	id := r.URL.Query().Get("Id")
 	port := r.URL.Query().Get("AgentPort")
 	intid, _ := strconv.Atoi(id)
 	fmt.Println(result, intid)
 
-	for i := 0; i < len(EXAMPLEexpressionList); i++ {
-		if EXAMPLEexpressionList[i].ExpressionID == intid {
-			if EXAMPLEexpressionList[i].Status == "solving" {
-				EXAMPLEexpressionList[i].ExpressionResult = result
-				EXAMPLEexpressionList[i].Status = "solved"
+	for i := 0; i < len(sd.ExpressionList); i++ {
+		if sd.ExpressionList[i].ExpressionID == intid {
+			if sd.ExpressionList[i].Status == "solving" {
+				sd.ExpressionList[i].ExpressionResult = result
+				sd.ExpressionList[i].Status = "solved"
 				break
 			}
 
@@ -273,80 +353,79 @@ func ReceiveResult(w http.ResponseWriter, r *http.Request) { //получени�
 
 	}
 
-	for i, agent := range EXAMPLEagentList {
+	for i, agent := range sd.AgentList {
 		if agent.Port == port {
-			EXAMPLEagentList[i].Status = "online"
+			sd.AgentList[i].Status = "online"
 			break
 		}
 
 	}
 }
 
-func AddExpression(w http.ResponseWriter, r *http.Request) { //добавление введённого юзером выражения, выражения могут повторяться, но только у разных юзеров
+func (sd *SharedData) AddExpression(w http.ResponseWriter, r *http.Request) { //добавление введённого юзером выражения, выражения могут повторяться, но только у разных юзеров
 	user := r.Context().Value("user").(User)
 	txt := r.FormValue("item")
 	needtoadd := true
 	needtoaddsameforanotheruser := false
 	thisexpression := Expression{}
 	username := user.UserName
-	for i := range EXAMPLEexpressionList {
-		if EXAMPLEexpressionList[i].ExpressionText == txt {
-			if EXAMPLEexpressionList[i].UserName == username {
+	for i := range sd.ExpressionList {
+		if sd.ExpressionList[i].ExpressionText == txt {
+			if sd.ExpressionList[i].UserName == username {
 				needtoadd = false
 			} else {
 				needtoaddsameforanotheruser = true
-				thisexpression = EXAMPLEexpressionList[i]
+				thisexpression = sd.ExpressionList[i]
 			}
 			break
 		}
 	}
 	if needtoadd {
 		if needtoaddsameforanotheruser {
-			EXAMPLEexpressionList = append(EXAMPLEexpressionList, Expression{ExpressionText: thisexpression.ExpressionText, ExpressionID: len(EXAMPLEexpressionList), ExpressionResult: thisexpression.ExpressionResult, Status: thisexpression.Status, UserName: username, BeingSolvedByPort: ""})
+			sd.ExpressionList = append(sd.ExpressionList, Expression{ExpressionText: thisexpression.ExpressionText, ExpressionID: len(sd.ExpressionList), ExpressionResult: thisexpression.ExpressionResult, Status: thisexpression.Status, UserName: username, BeingSolvedByPort: ""})
 		} else if isValidExpression(txt) {
-			EXAMPLEexpressionList = append(EXAMPLEexpressionList, Expression{ExpressionText: txt, ExpressionID: len(EXAMPLEexpressionList), ExpressionResult: "0", Status: "unsolved", UserName: username, BeingSolvedByPort: ""})
+			sd.ExpressionList = append(sd.ExpressionList, Expression{ExpressionText: txt, ExpressionID: len(sd.ExpressionList), ExpressionResult: "0", Status: "unsolved", UserName: username, BeingSolvedByPort: ""})
 		} else {
-			EXAMPLEexpressionList = append(EXAMPLEexpressionList, Expression{ExpressionText: txt, ExpressionID: len(EXAMPLEexpressionList), ExpressionResult: "0", Status: "invalid", UserName: username, BeingSolvedByPort: ""})
+			sd.ExpressionList = append(sd.ExpressionList, Expression{ExpressionText: txt, ExpressionID: len(sd.ExpressionList), ExpressionResult: "0", Status: "invalid", UserName: username, BeingSolvedByPort: ""})
 		}
 	}
-	fmt.Println(EXAMPLEexpressionList)
 	http.Redirect(w, r, "/calculator/", http.StatusSeeOther)
 }
 
-func CalculatorPage(w http.ResponseWriter, r *http.Request) { // /calculator/ отрисовка страницы калькулятор, в темплейт передаётся список выражений и пользователь, под чьим логином произведён вход
+func (sd *SharedData) CalculatorPage(w http.ResponseWriter, r *http.Request) { // /calculator/ отрисовка страницы калькулятор, в темплейт передаётся список выражений и пользователь, под чьим логином произведён вход
 	tmpl := template.Must(template.ParseFiles("html/calculator.html"))
 	user := r.Context().Value("user").(User)
 	data := TemplateExpressionsData{
-		List:     EXAMPLEexpressionList,
+		List:     sd.ExpressionList,
 		Username: user.UserName,
 	}
 	tmpl.Execute(w, data)
 }
 
-func ChangeTimings(w http.ResponseWriter, r *http.Request) { //меняет тайминги у юзера
+func (sd *SharedData) ChangeTimings(w http.ResponseWriter, r *http.Request) { //меняет тайминги у юзера
 	user := r.Context().Value("user").(User)
 	username := user.UserName
 	plus, err1 := strconv.Atoi(r.FormValue("plu"))
 	minus, err2 := strconv.Atoi(r.FormValue("min"))
-	multiply, err3 := strconv.Atoi(r.FormValue("mul"))
+	Multiply, err3 := strconv.Atoi(r.FormValue("Mul"))
 	divide, err4 := strconv.Atoi(r.FormValue("div"))
 	toshow, err5 := strconv.Atoi(r.FormValue("whb"))
-	for i, user := range EXAMPLEuserList {
+	for i, user := range sd.UserList {
 		if user.UserName == username {
 			if err1 == nil {
-				EXAMPLEuserList[i].PlusTiming = plus
+				sd.UserList[i].PlusTiming = plus
 			}
 			if err2 == nil {
-				EXAMPLEuserList[i].MinusTiming = minus
+				sd.UserList[i].MinusTiming = minus
 			}
 			if err3 == nil {
-				EXAMPLEuserList[i].MultiplyTiming = multiply
+				sd.UserList[i].MultiplyTiming = Multiply
 			}
 			if err4 == nil {
-				EXAMPLEuserList[i].DivideTiming = divide
+				sd.UserList[i].DivideTiming = divide
 			}
 			if err5 == nil {
-				EXAMPLEuserList[i].ToShowTiming = toshow
+				sd.UserList[i].ToShowTiming = toshow
 			}
 			break
 		}
@@ -355,27 +434,26 @@ func ChangeTimings(w http.ResponseWriter, r *http.Request) { //меняет та
 	http.Redirect(w, r, "/timings/", http.StatusSeeOther)
 }
 
-func TimingsPage(w http.ResponseWriter, r *http.Request) { // /timings/ отрисовка страницы с таймингами, в темплейт передаётся список юзеров и пользователь, под чьим логином произведён вход
+func (sd *SharedData) TimingsPage(w http.ResponseWriter, r *http.Request) { // /timings/ отрисовка страницы с таймингами, в темплейт передаётся список юзеров и пользователь, под чьим логином произведён вход
 	tmpl := template.Must(template.ParseFiles("html/timings.html"))
-	tmpl.Execute(w, EXAMPLEuserList)
 	user := r.Context().Value("user").(User)
 	data := TemplateUserData{
-		List:     EXAMPLEuserList,
+		List:     sd.UserList,
 		Username: user.UserName,
 	}
 	tmpl.Execute(w, data)
 }
 
-func AddAgent(w http.ResponseWriter, r *http.Request) { //добавление нового агента пользователем
+func (sd *SharedData) AddAgent(w http.ResponseWriter, r *http.Request) { //добавление нового агента пользователем
 	port := r.FormValue("agentport")
 	doneedtoadd := true
 	_, err := strconv.Atoi(port)
-	for i, agent := range EXAMPLEagentList {
+	for i, agent := range sd.AgentList {
 		if agent.Port == port {
 			doneedtoadd = false
 			if agent.Status == "dead" {
-				EXAMPLEagentList[i].Status = "online"
-				EXAMPLEagentList[i].NotRespondedFor = 0
+				sd.AgentList[i].Status = "online"
+				sd.AgentList[i].NotRespondedFor = 0
 			}
 			break
 		}
@@ -384,47 +462,46 @@ func AddAgent(w http.ResponseWriter, r *http.Request) { //добавление �
 		fmt.Println(err)
 		http.Redirect(w, r, "/agents/", http.StatusSeeOther)
 	} else {
-		addr := fmt.Sprintf("http://localhost:%s/connect/?HostPort=%s", port, OrchestraPort)
+		addr := fmt.Sprintf("http://localhost%s/connect/?HostPort=%s", port, OrchestraPort)
 		_, _ = http.Get(addr)
 
-		EXAMPLEagentList = append(EXAMPLEagentList, Agent{Port: port, Status: "online", NotRespondedFor: 0, AgentID: len(EXAMPLEagentList)})
+		sd.AgentList = append(sd.AgentList, Agent{Port: port, Status: "online", NotRespondedFor: 0, AgentID: len(sd.AgentList)})
 
 		http.Redirect(w, r, "/agents/", http.StatusSeeOther)
 	}
 }
 
-func AgentsPage(w http.ResponseWriter, r *http.Request) { // /agents/ отрисовка страницы с агентами, в темплейт передаётся список агентов и пользователь, под чьим логином произведён вход
+func (sd *SharedData) AgentsPage(w http.ResponseWriter, r *http.Request) { // /agents/ отрисовка страницы с агентами, в темплейт передаётся список агентов и пользователь, под чьим логином произведён вход
 	tmpl := template.Must(template.ParseFiles("html/agents.html"))
-	tmpl.Execute(w, EXAMPLEagentList)
 	user := r.Context().Value("user").(User)
 	data := TemplateAgentData{
-		List:     EXAMPLEagentList,
+		List:     sd.AgentList,
 		Username: user.UserName,
 		ShowFor:  user.ToShowTiming,
 	}
 	tmpl.Execute(w, data)
 }
 
-func heartbeat() { //всем подключенным агентам отправляется хартбит через цикл фор, те, кто не принял - not responding
+func heartbeat(sd *SharedData) { //всем подключенным агентам отправляется хартбит через цикл фор, те, кто не принял - not responding
 	for {
-		if len(EXAMPLEagentList) != 0 {
-			for i, agent := range EXAMPLEagentList {
-				if EXAMPLEagentList[i].NotRespondedFor >= 1 {
-					EXAMPLEagentList[i].Status = "notresponding"
+		if len(sd.AgentList) != 0 {
+			for i, agent := range sd.AgentList {
+				if sd.AgentList[i].NotRespondedFor >= 1 {
+					sd.AgentList[i].Status = "notresponding"
 				}
-				if EXAMPLEagentList[i].NotRespondedFor >= 30 {
-					EXAMPLEagentList[i].Status = "dead"
+				if sd.AgentList[i].NotRespondedFor >= 30 {
+					sd.AgentList[i].Status = "dead"
 				}
-				if EXAMPLEagentList[i].Status != "dead" {
+				if sd.AgentList[i].Status != "dead" {
 					heartbeataddr := fmt.Sprintf("http://localhost:%s/heartbeat/?HostPort=%s", agent.Port, OrchestraPort)
 					_, err := http.Get(heartbeataddr)
 					if err != nil {
-						EXAMPLEagentList[i].NotRespondedFor++
+						sd.AgentList[i].NotRespondedFor++
 						continue
 					} else {
-						if EXAMPLEagentList[i].Status != "busy" {
-							EXAMPLEagentList[i].NotRespondedFor = 0
-							EXAMPLEagentList[i].Status = "online"
+						if sd.AgentList[i].Status != "busy" {
+							sd.AgentList[i].NotRespondedFor = 0
+							sd.AgentList[i].Status = "online"
 						}
 					}
 				}
@@ -435,28 +512,28 @@ func heartbeat() { //всем подключенным агентам отпра
 
 }
 
-func solver() { //пробегается по агентам и выражениям, если есть свободные и нерешённые - отправляет агентам выражения
+func solver(sd *SharedData) { //пробегается по агентам и выражениям, если есть свободные и нерешённые - отправляет агентам выражения
 	for {
 		time.Sleep(time.Second)
-		if len(EXAMPLEexpressionList) != 0 && len(EXAMPLEagentList) != 0 {
-			for i := 0; i < len(EXAMPLEexpressionList); i++ {
-				if EXAMPLEexpressionList[i].Status == "unsolved" {
-					for j := range EXAMPLEagentList {
-						if EXAMPLEagentList[j].Status == "online" && EXAMPLEexpressionList[i].Status == "unsolved" {
-							textwithreplacements := EXAMPLEexpressionList[i].ExpressionText
+		if len(sd.ExpressionList) != 0 && len(sd.AgentList) != 0 {
+			for i := 0; i < len(sd.ExpressionList); i++ {
+				if sd.ExpressionList[i].Status == "unsolved" {
+					for j := range sd.AgentList {
+						if sd.AgentList[j].Status == "online" && sd.ExpressionList[i].Status == "unsolved" {
+							textwithreplacements := sd.ExpressionList[i].ExpressionText
 							textwithreplacements = strings.ReplaceAll(textwithreplacements, "+", "%2B")
 							textwithreplacements = strings.ReplaceAll(textwithreplacements, "/", "%2F")
-							stringid := strconv.Itoa(EXAMPLEexpressionList[i].ExpressionID)
-							plus, minus, mul, div, _ := getTimingsByExpression(EXAMPLEexpressionList[i])
-							addr := fmt.Sprintf("http://localhost:%s/solve/?Expression=%s&Id=%s&ExecutionTimings=%s!%s!%s!%s", EXAMPLEagentList[j].Port, textwithreplacements, stringid, plus, minus, mul, div)
+							stringid := strconv.Itoa(sd.ExpressionList[i].ExpressionID)
+							plus, minus, Mul, div, _ := sd.getTimingsByExpression(sd.ExpressionList[i])
+							addr := fmt.Sprintf("http://localhost:%s/solve/?Expression=%s&Id=%s&ExecutionTimings=%s!%s!%s!%s", sd.AgentList[j].Port, textwithreplacements, stringid, plus, minus, Mul, div)
 							fmt.Println(addr)
 							_, err := http.Get(addr)
 							if err != nil {
 								fmt.Println(err)
 							} else {
-								EXAMPLEexpressionList[i].Status = "solving"
-								EXAMPLEagentList[j].Status = "busy"
-								EXAMPLEexpressionList[i].BeingSolvedByPort = EXAMPLEagentList[j].Port
+								sd.ExpressionList[i].Status = "solving"
+								sd.AgentList[j].Status = "busy"
+								sd.ExpressionList[i].BeingSolvedByPort = sd.AgentList[j].Port
 							}
 
 						}
@@ -466,19 +543,42 @@ func solver() { //пробегается по агентам и выражени
 		}
 	}
 }
-func agentChecker() { //проверяет, есть ли выражения, которые числятся решающимися, но решающий их агент - оффлайн
+func agentChecker(sd *SharedData) { //проверяет, есть ли выражения, которые числятся решающимися, но решающий их агент - оффлайн
 	for {
-		for i := range EXAMPLEexpressionList {
-			for j := range EXAMPLEagentList {
-				if EXAMPLEexpressionList[i].Status == "solving" {
-					if EXAMPLEexpressionList[i].BeingSolvedByPort == EXAMPLEagentList[j].Port && EXAMPLEagentList[j].Status == "notresponding" {
-						EXAMPLEexpressionList[i].Status = "unsolved"
-						EXAMPLEexpressionList[i].BeingSolvedByPort = ""
+		for i := range sd.ExpressionList {
+			for j := range sd.AgentList {
+				if sd.ExpressionList[i].Status == "solving" {
+					if sd.ExpressionList[i].BeingSolvedByPort == sd.AgentList[j].Port && sd.AgentList[j].Status == "notresponding" {
+						sd.ExpressionList[i].Status = "unsolved"
+						sd.ExpressionList[i].BeingSolvedByPort = ""
 					}
 				}
 			}
 		}
 		time.Sleep(time.Second)
+	}
+}
+
+func initAgentsAndExpressions(sd *SharedData) { // при запуске программы приводит всех агентов и выражения в начальные состояния
+	for i := range sd.AgentList {
+		if sd.AgentList[i].Status != "dead" {
+			sd.AgentList[i].Status = "online"
+		}
+	}
+	for i := range sd.ExpressionList {
+		if sd.ExpressionList[i].Status == "solving" {
+			sd.ExpressionList[i].Status = "unsolved"
+			sd.ExpressionList[i].BeingSolvedByPort = ""
+		}
+	}
+}
+
+func handleSignal(c chan os.Signal, sd *SharedData) { // при нажатии ctrl+c сохраняет структуру SharedData в файл
+	for {
+		<-c
+		fmt.Println("SIGINT received, saving data...")
+		sd.saveToFile()
+		os.Exit(0)
 	}
 }
 
@@ -488,25 +588,47 @@ func main() {
 	if OrchestraPort == "" {
 		log.Fatal("PORT not set")
 	}
-	go heartbeat()
-	go solver()
-	go agentChecker()
+
+	err := createJSONFileIfNotExist(datapath) // создание файла, если его нет
+	if err != nil {
+		panic(err)
+	}
+
+	sd, err := NewSharedData(datapath) // запись файла в структуру SharedData
+	if err != nil {
+		panic(err)
+	}
+	initAgentsAndExpressions(sd)
+
+	c := make(chan os.Signal, 1) // обработка ctrl+C
+	signal.Notify(c,
+		syscall.SIGHUP,
+		syscall.SIGINT,
+		syscall.SIGTERM,
+		syscall.SIGQUIT)
+
+	go handleSignal(c, sd)
+	go heartbeat(sd)
+	go solver(sd)
+	go agentChecker(sd) //логика программы
+
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/login/", http.StatusSeeOther)
 	})
 	http.HandleFunc("/registration/", RegistrationHandler)
 	http.HandleFunc("/login/", LoginHandler)
 
-	http.HandleFunc("/adduser/", RegisterUser)
-	http.HandleFunc("/submit/", LoginUser)
+	http.HandleFunc("/adduser/", sd.RegisterUser)
+	http.HandleFunc("/submit/", sd.LoginUser)
 
-	http.HandleFunc("/receiveresult/", ReceiveResult)
-	http.HandleFunc("/add/", CheckCookieMiddleware(AddExpression, &validCookies))
-	http.HandleFunc("/changetimings/", CheckCookieMiddleware(ChangeTimings, &validCookies))
-	http.HandleFunc("/addagent/", CheckCookieMiddleware(AddAgent, &validCookies))
+	http.HandleFunc("/receiveresult/", sd.ReceiveResult)
+	http.HandleFunc("/add/", sd.CheckCookieMiddleware(sd.AddExpression))
+	http.HandleFunc("/changetimings/", sd.CheckCookieMiddleware(sd.ChangeTimings))
+	http.HandleFunc("/addagent/", sd.CheckCookieMiddleware(sd.AddAgent))
 
-	http.HandleFunc("/agents/", CheckCookieMiddleware(AgentsPage, &validCookies))
-	http.HandleFunc("/calculator/", CheckCookieMiddleware(CalculatorPage, &validCookies))
-	http.HandleFunc("/timings/", CheckCookieMiddleware(TimingsPage, &validCookies))
+	http.HandleFunc("/agents/", sd.CheckCookieMiddleware(sd.AgentsPage))
+	http.HandleFunc("/calculator/", sd.CheckCookieMiddleware(sd.CalculatorPage))
+	http.HandleFunc("/timings/", sd.CheckCookieMiddleware(sd.TimingsPage))
 	http.ListenAndServe(OrchestraPort, nil)
+	//обработка эндпоинтов
 }
