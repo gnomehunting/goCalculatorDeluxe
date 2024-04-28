@@ -407,7 +407,7 @@ func (sd *SharedData) ChangeTimings(w http.ResponseWriter, r *http.Request) { //
 	username := user.UserName
 	plus, err1 := strconv.Atoi(r.FormValue("plu"))
 	minus, err2 := strconv.Atoi(r.FormValue("min"))
-	Multiply, err3 := strconv.Atoi(r.FormValue("Mul"))
+	multiply, err3 := strconv.Atoi(r.FormValue("mul"))
 	divide, err4 := strconv.Atoi(r.FormValue("div"))
 	toshow, err5 := strconv.Atoi(r.FormValue("whb"))
 	for i, user := range sd.UserList {
@@ -419,7 +419,7 @@ func (sd *SharedData) ChangeTimings(w http.ResponseWriter, r *http.Request) { //
 				sd.UserList[i].MinusTiming = minus
 			}
 			if err3 == nil {
-				sd.UserList[i].MultiplyTiming = Multiply
+				sd.UserList[i].MultiplyTiming = multiply
 			}
 			if err4 == nil {
 				sd.UserList[i].DivideTiming = divide
